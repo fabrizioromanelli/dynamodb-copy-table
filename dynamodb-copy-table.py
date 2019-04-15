@@ -15,7 +15,7 @@ if len(sys.argv) != 3:
 
 src_table = sys.argv[1]
 dst_table = sys.argv[2]
-region = os.getenv('AWS_DEFAULT_REGION', 'us-west-2')
+region = os.getenv('AWS_DEFAULT_REGION', 'eu-west-1')
 
 # host = 'dynamodb.%s.amazonaws.com' % region
 # ddbc = DynamoDBConnection(is_secure=False, region=region, host=host)
@@ -43,37 +43,48 @@ for schema in src['KeySchema']:
     elif key_type == 'RANGE':
         range_key = attr_name
 
-# 2. Create the new table
+# 2. Update the destination table
 table_struct = None
+table_exists = False
 try:
-    new_logs = Table(dst_table,
-                     connection=ddbc,
-                     schema=[HashKey(hash_key),
-                             RangeKey(range_key),
-                             ]
-                     )
-
+    new_logs = Table(dst_table, connection=ddbc)
     table_struct = new_logs.describe()
-    print 'Table %s already exists' % dst_table
-    sys.exit(0)
+    table_exists = True
 except JSONResponseError:
-    schema = [HashKey(hash_key)]
-    if range_key != '':
-        schema.append(RangeKey(range_key))
-    new_logs = Table.create(dst_table,
-                            connection=ddbc,
-                            schema=schema,
-                            )
-    print '*** Waiting for the new table %s to become active' % dst_table
-    sleep(5)
-    while ddbc.describe_table(dst_table)['Table']['TableStatus'] != 'ACTIVE':
-        sleep(3)
+    print "Table %s does not exist" % dst_table
 
-if 'DISABLE_DATACOPY' in os.environ:
-    print 'Copying of data from source table is disabled. Exiting...'
-    sys.exit(0)
+# 3. Create the new table if it does not exist
+if not table_exists:
+    table_struct = None
+    try:
+        new_logs = Table(dst_table,
+                         connection=ddbc,
+                         schema=[HashKey(hash_key),
+                                 RangeKey(range_key),
+                                 ]
+                         )
 
-# 3. Add the items
+        table_struct = new_logs.describe()
+        print 'Table %s already exists' % dst_table
+        sys.exit(0)
+    except JSONResponseError:
+        schema = [HashKey(hash_key)]
+        if range_key != '':
+            schema.append(RangeKey(range_key))
+        new_logs = Table.create(dst_table,
+                                connection=ddbc,
+                                schema=schema,
+                                )
+        print '*** Waiting for the new table %s to become active' % dst_table
+        sleep(5)
+        while ddbc.describe_table(dst_table)['Table']['TableStatus'] != 'ACTIVE':
+            sleep(3)
+
+    if 'DISABLE_DATACOPY' in os.environ:
+        print 'Copying of data from source table is disabled. Exiting...'
+        sys.exit(0)
+
+# 4. Add the items
 for item in logs.scan():
     new_item = {}
     new_item[hash_key] = item[hash_key]
